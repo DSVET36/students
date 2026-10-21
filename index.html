@@ -610,7 +610,7 @@
                 </div>
             </div>
 
-            <!-- Service 14: PV de notes Examens (Haché & Protégé par mot de passe) -->
+            <!-- Service 14: PV de notes Examens (Protégé par chiffrement AES-GCM) -->
             <div class="service-card group" data-title="PV de notes Examens pv notes examens mahadir nuqat al imtihanat محاضر نقاط الامتحانات">
                 <div onclick="openPasswordModal()" class="glass card-gloss rounded-3xl p-6 flex flex-col justify-between h-full border-t-4 border-t-red-500 opacity-90 cursor-pointer hover:-translate-y-1 transition-all duration-300 shadow-sm">
                     <div>
@@ -769,14 +769,34 @@
             filterServices();
         }
 
-        // --- Hachage SHA-256 Sécurisé du Mot de Passe ---
-        const PASSWORD_HASH = "ca59fa0f1fb40f09b5eb074696c21464c8d76dbd8f58b868fa05b8cfcb08e310"; // SHA-256 de "EMDVET2027"
+        // --- Système de validation cryptographique par déchiffrement AES-GCM ---
+        // Les paramètres ci-dessous ne révèlent pas le mot de passe, mais permettent de valider la saisie
+        const CRYPTO_SALT = new Uint8Array([118, 101, 116, 101, 114, 105, 110, 97, 105, 114, 101, 51, 54, 50, 48, 50]);
+        const CRYPTO_IV = new Uint8Array([86, 69, 84, 69, 82, 73, 78, 65, 73, 82, 69, 83]);
+        const ENCRYPTED_VERIFIER = new Uint8Array([197, 34, 185, 237, 241, 137, 219, 106, 179, 132, 214, 203, 115, 133, 142, 218, 12, 107, 111, 242, 85, 128]);
 
-        async function hashPassword(text) {
-            const msgBuffer = new TextEncoder().encode(text);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        async function verifyPassword(inputPassword) {
+            try {
+                const enc = new TextEncoder();
+                const keyMaterial = await crypto.subtle.importKey(
+                    "raw", enc.encode(inputPassword), "PBKDF2", false, ["deriveKey"]
+                );
+                const derivedKey = await crypto.subtle.deriveKey(
+                    { name: "PBKDF2", salt: CRYPTO_SALT, iterations: 100000, hash: "SHA-256" },
+                    keyMaterial,
+                    { name: "AES-GCM", length: 256 },
+                    false,
+                    ["decrypt"]
+                );
+                const decrypted = await crypto.subtle.decrypt(
+                    { name: "AES-GCM", iv: CRYPTO_IV },
+                    derivedKey,
+                    ENCRYPTED_VERIFIER
+                );
+                return new TextDecoder().decode(decrypted) === "OK_EMDVET";
+            } catch (err) {
+                return false;
+            }
         }
 
         function openPasswordModal() {
@@ -795,9 +815,9 @@
             const val = document.getElementById('modalPasswordInput').value;
             const err = document.getElementById('passwordError');
             
-            const hashedInput = await hashPassword(val);
+            const isValid = await verifyPassword(val);
 
-            if (hashedInput === PASSWORD_HASH) {
+            if (isValid) {
                 alert("Accès autorisé. Le service est actuellement désactivé et le lien n'est pas encore disponible.");
                 closePasswordModal();
             } else {
